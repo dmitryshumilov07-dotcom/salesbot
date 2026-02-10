@@ -9,7 +9,7 @@ import uuid
 import structlog
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, BackgroundTasks, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
@@ -371,3 +371,51 @@ async def direct_chat(request: DirectChatRequest):
     await session_mgr.save_message(request.session_id, "assistant", response_text)
 
     return {"session_id": request.session_id, "reply": response_text}
+
+
+# ----- RAG Endpoints -----
+
+@app.get("/api/rag/status")
+async def rag_status():
+    """Get RAG system status."""
+    try:
+        from agents.rag.agent import get_rag_agent
+        agent = get_rag_agent()
+        status = await agent.get_status()
+        return status
+    except Exception as e:
+        return {"error": str(e), "status": "unavailable"}
+
+
+@app.post("/api/rag/search")
+async def rag_search(request: Request):
+    """Search product catalog via RAG."""
+    body = await request.json()
+    query = body.get("query", "")
+    if not query:
+        return {"error": "query is required"}
+
+    from agents.rag.agent import get_rag_agent
+    agent = get_rag_agent()
+    result = await agent.search(
+        query=query,
+        limit=body.get("limit", 10),
+        brand=body.get("brand"),
+        category=body.get("category"),
+    )
+    return result
+
+
+@app.post("/api/rag/reload")
+async def rag_reload(background_tasks: BackgroundTasks):
+    """Trigger full catalog reload from ETM API (background task)."""
+    import asyncio
+    from agents.rag.etm_loader import load_catalog_from_api
+
+    async def do_reload():
+        result = await load_catalog_from_api(poll_interval=60)
+        logger.info("rag_reload_complete", result=result)
+
+    background_tasks.add_task(asyncio.coroutine(lambda: asyncio.run(do_reload())))
+    return {"status": "reload_started", "message": "Catalog reload started in background"}
+
