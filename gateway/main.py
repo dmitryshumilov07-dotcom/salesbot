@@ -22,6 +22,7 @@ from agents.dispatcher import (
     Task, TaskResult, TaskStatus, TaskType,
 )
 from gateway.sessions import get_session_manager
+from agents.etm.handler import handle_etm_price, handle_etm_remains
 
 logger = structlog.get_logger()
 settings = get_settings()
@@ -35,6 +36,25 @@ async def lifespan(app: FastAPI):
     dispatcher = get_dispatcher()
     await _register_known_agents(dispatcher)
     logger.info("dispatcher_initialized")
+
+    # Register ETM handlers (in-process, synchronous dispatch)
+    dispatcher.register_handler("etm_price", handle_etm_price)
+    dispatcher.register_handler("etm_remains", handle_etm_remains)
+    logger.info("etm_handlers_registered")
+
+    # Set etm_agent as ONLINE since handler is in-process
+    from redis.asyncio import Redis as _Redis
+    _r = _Redis.from_url(settings.redis_url, decode_responses=True)
+    _agent_data = await _r.hget("dispatcher:agents", "etm_agent")
+    if _agent_data:
+        import json as _json
+        _ad = _json.loads(_agent_data)
+        _ad["status"] = "online"
+        import time as _time
+        _ad["last_heartbeat"] = _time.time()
+        await _r.hset("dispatcher:agents", "etm_agent", _json.dumps(_ad))
+    await _r.close()
+    logger.info("etm_agent_set_online")
 
     yield
 
