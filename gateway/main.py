@@ -23,6 +23,7 @@ from agents.dispatcher import (
 )
 from gateway.sessions import get_session_manager
 from agents.etm.handler import handle_etm_price, handle_etm_remains
+from agents.rag.handler import handle_rag_search
 
 logger = structlog.get_logger()
 settings = get_settings()
@@ -55,6 +56,19 @@ async def lifespan(app: FastAPI):
         await _r.hset("dispatcher:agents", "etm_agent", _json.dumps(_ad))
     await _r.close()
     logger.info("etm_agent_set_online")
+
+    # Set analysis_agent (RAG) as ONLINE
+    _agent_data2 = await _r2.hget("dispatcher:agents", "analysis_agent") if False else None
+    # Actually, reuse the Redis approach
+    _r3 = _Redis.from_url(settings.redis_url, decode_responses=True)
+    _rag_data = await _r3.hget("dispatcher:agents", "analysis_agent")
+    if _rag_data:
+        _rd = _json.loads(_rag_data)
+        _rd["status"] = "online"
+        _rd["last_heartbeat"] = _time.time()
+        await _r3.hset("dispatcher:agents", "analysis_agent", _json.dumps(_rd))
+    await _r3.close()
+    logger.info("rag_agent_set_online")
 
     yield
 
