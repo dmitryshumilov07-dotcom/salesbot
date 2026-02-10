@@ -49,6 +49,13 @@ ETM_ONLY_PATTERN = re.compile(
 )
 
 
+# WebUI system requests that should NOT be intercepted
+WEBUI_SYSTEM_PATTERN = re.compile(
+    r'(?:### Task:|Generate a concise|Suggest \d|summarizing the chat|categorizing the main themes)',
+    re.IGNORECASE,
+)
+
+
 def _detect_etm_ids_from_user(message: str) -> list[str] | None:
     """
     Detect ETM product IDs directly from user message.
@@ -57,8 +64,18 @@ def _detect_etm_ids_from_user(message: str) -> list[str] | None:
     Two modes:
     1. Message with keyword: "цена 9536092" / "проверь 9536092, 1037375"
     2. Message is ONLY codes: "9536092" / "9536092, 1037375" / "ETM9536092"
+
+    Excludes WebUI system requests (title/tags/suggestions generation).
     """
     msg = message.strip()
+
+    # Skip WebUI internal requests (title generation, tags, suggestions)
+    if WEBUI_SYSTEM_PATTERN.search(msg):
+        return None
+
+    # Skip messages longer than 200 chars — likely not a simple ETM query
+    if len(msg) > 200:
+        return None
 
     # Mode 1: message contains only ETM codes (no other text)
     if ETM_ONLY_PATTERN.match(msg):
