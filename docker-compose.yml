@@ -1,0 +1,60 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: salesbot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: salesbot
+      POSTGRES_USER: salesbot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-salesbot_secure_2026}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U salesbot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: salesbot-redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD:-redis_secure_2026} --appendonly yes
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/var/lib/redis/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_secure_2026}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: salesbot-webui
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:3000:8080"
+    environment:
+      - OPENAI_API_BASE_URLS=http://host.docker.internal:8000/v1
+      - OPENAI_API_KEYS=sk-salesbot-internal
+      - WEBUI_SECRET_KEY=${JWT_SECRET:-change_me_secret_2026}
+      - WEBUI_AUTH=true
+      - ENABLE_SIGNUP=true
+      - DEFAULT_MODELS=salesbot-consultant
+      - ENABLE_OLLAMA_API=false
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - webui_data:/app/backend/data
+    depends_on:
+      - postgres
+      - redis
+
+volumes:
+  postgres_data:
+  redis_data:
+  webui_data:
