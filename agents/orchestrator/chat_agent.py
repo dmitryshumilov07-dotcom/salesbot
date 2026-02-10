@@ -42,31 +42,39 @@ ETM_KEYWORDS = re.compile(
     r'(?:цен[аыу]|price|стоимость|остат[коки]|наличие|проверь|узнай|запроси|покажи|по коду|по кодам|по id)',
     re.IGNORECASE,
 )
+# Pattern to check if message is ONLY ETM codes (numbers, commas, spaces, ETM prefix)
+ETM_ONLY_PATTERN = re.compile(
+    r'^[\s,;.]*(?:(?:ETM|ЭТМ|etm)?\s*\d{6,8}[\s,;.]*)+$',
+    re.IGNORECASE,
+)
 
 
 def _detect_etm_ids_from_user(message: str) -> list[str] | None:
     """
     Detect ETM product IDs directly from user message.
     Returns list of IDs if user is asking for ETM prices, None otherwise.
+
+    Two modes:
+    1. Message with keyword: "цена 9536092" / "проверь 9536092, 1037375"
+    2. Message is ONLY codes: "9536092" / "9536092, 1037375" / "ETM9536092"
     """
-    # Must contain a price/stock keyword
-    if not ETM_KEYWORDS.search(message):
-        return None
+    msg = message.strip()
 
-    # Find all 6-8 digit codes
-    codes = ETM_CODE_PATTERN.findall(message)
-    if not codes:
-        return None
+    # Mode 1: message contains only ETM codes (no other text)
+    if ETM_ONLY_PATTERN.match(msg):
+        codes = ETM_CODE_PATTERN.findall(msg)
+        if codes:
+            seen = set()
+            return [c for c in codes if c not in seen and not seen.add(c)]
 
-    # Deduplicate while preserving order
-    seen = set()
-    unique = []
-    for c in codes:
-        if c not in seen:
-            seen.add(c)
-            unique.append(c)
+    # Mode 2: message has keyword + codes
+    if ETM_KEYWORDS.search(msg):
+        codes = ETM_CODE_PATTERN.findall(msg)
+        if codes:
+            seen = set()
+            return [c for c in codes if c not in seen and not seen.add(c)]
 
-    return unique if unique else None
+    return None
 
 
 def _extract_order(response: str) -> dict | None:

@@ -238,6 +238,13 @@ async def chat_completions(request: ChatCompletionRequest):
     if user_msg.role != "user":
         raise HTTPException(status_code=400, detail="Last message must be from user")
 
+    # webui_debug: log what WebUI sends
+    logger.info("webui_debug",
+                stream=request.stream,
+                msg_count=len(request.messages),
+                last_msg_len=len(user_msg.content),
+                last_msg_preview=user_msg.content[:100])
+
     history = []
     for msg in request.messages[:-1]:
         if msg.role in ("user", "assistant"):
