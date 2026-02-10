@@ -334,10 +334,22 @@ class ChatAgent:
         history: list[dict] | None = None,
         session_id: str | None = None,
     ):
-        """Stream response. Note: dispatch happens only in non-stream mode."""
+        """Stream response with ETM fast-path support."""
         session_id = session_id or str(uuid.uuid4())
         history = history or []
 
+        # === FAST PATH: detect ETM IDs — return result as single chunk ===
+        etm_ids = _detect_etm_ids_from_user(user_message)
+        if etm_ids:
+            logger.info("chat_agent_etm_direct_stream",
+                        session_id=session_id, ids=etm_ids)
+            etm_result = await self._dispatch_etm_price(
+                {"ids": etm_ids, "type": "etm"}, session_id
+            )
+            yield etm_result
+            return
+
+        # === NORMAL PATH: LLM streaming ===
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         messages.extend(history)
         messages.append({"role": "user", "content": user_message})
