@@ -23,7 +23,10 @@ class HealthChecks:
     # === Server Resources ===
 
     async def check_cpu(self) -> dict:
-        cpu_percent = psutil.cpu_percent(interval=1)
+        # FIX: Use run_in_executor to avoid blocking the event loop
+        # psutil.cpu_percent(interval=1) is a blocking call that waits 1 second
+        loop = asyncio.get_running_loop()
+        cpu_percent = await loop.run_in_executor(None, lambda: psutil.cpu_percent(interval=1))
         return {
             "name": "CPU",
             "status": "critical" if cpu_percent > 90 else "warning" if cpu_percent > 75 else "ok",
@@ -70,12 +73,17 @@ class HealthChecks:
             return {"name": "Redis", "status": "critical", "value": str(e)[:80]}
 
     async def check_postgres(self) -> dict:
+        # FIX: Use settings instead of hardcoded credentials for security
+        # Credentials should be configured via environment variables
         try:
             import asyncpg
             conn = await asyncpg.connect(
-                host="127.0.0.1", port=5432,
-                user="salesbot", password="salesbot_secure_2026",
-                database="salesbot", timeout=5,
+                host=self.settings.postgres_host,
+                port=self.settings.postgres_port,
+                user=self.settings.postgres_user,
+                password=self.settings.postgres_password,
+                database=self.settings.postgres_db,
+                timeout=5,
             )
             result = await conn.fetchval("SELECT 1")
             await conn.close()

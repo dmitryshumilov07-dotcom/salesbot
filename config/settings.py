@@ -1,13 +1,25 @@
 from pydantic_settings import BaseSettings
+from pydantic import Field
 from functools import lru_cache
 
 
 class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql+asyncpg://salesbot:salesbot_secure_2026@127.0.0.1:5432/salesbot"
+    
+    # PostgreSQL connection settings (extracted from database_url for direct connections)
+    # These should be set via environment variables in production
+    postgres_host: str = Field(default="127.0.0.1", alias="POSTGRES_HOST")
+    postgres_port: int = Field(default=5432, alias="POSTGRES_PORT")
+    postgres_user: str = Field(default="salesbot", alias="POSTGRES_USER")
+    postgres_password: str = Field(default="salesbot_secure_2026", alias="POSTGRES_PASSWORD")
+    postgres_db: str = Field(default="salesbot", alias="POSTGRES_DB")
 
     # Redis
     redis_url: str = "redis://:redis_secure_2026@127.0.0.1:6379/0"
+    
+    # Admin settings (should be set via environment variables in production)
+    admin_user_id: int = Field(default=160217558, alias="ADMIN_USER_ID")
 
     # GigaChat
     gigachat_client_id: str = ""

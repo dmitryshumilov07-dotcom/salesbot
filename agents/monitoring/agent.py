@@ -19,7 +19,10 @@ from agents.monitoring.notifier import TelegramNotifier
 
 logger = structlog.get_logger()
 
-ADMIN_USER_ID = 160217558
+# FIX: Use settings instead of hardcoded admin ID for security
+# The admin user ID should be configured via ADMIN_USER_ID environment variable
+_settings = get_settings()
+ADMIN_USER_ID = _settings.admin_user_id
 REPORT_INTERVAL = 10800  # 3 hours in seconds
 REPAIR_QUEUE_KEY = "repair:tasks"
 REPAIR_APPROVAL_QUEUE = "repair:approvals"
