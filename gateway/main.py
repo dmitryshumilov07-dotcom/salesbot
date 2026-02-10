@@ -43,6 +43,10 @@ async def lifespan(app: FastAPI):
     dispatcher.register_handler("etm_remains", handle_etm_remains)
     logger.info("etm_handlers_registered")
 
+    # Register RAG handler
+    dispatcher.register_handler("analysis", handle_rag_search)
+    logger.info("rag_handler_registered")
+
     # Set etm_agent as ONLINE since handler is in-process
     from redis.asyncio import Redis as _Redis
     _r = _Redis.from_url(settings.redis_url, decode_responses=True)
