@@ -34,6 +34,40 @@ JSON_LINE_PATTERN = re.compile(r'(\{"action"\s*:\s*"submit_order".*?\})', re.DOT
 ETM_PRICE_BLOCK = re.compile(r'```json\s*(\{.*?"action"\s*:\s*"etm_price".*?\})\s*```', re.DOTALL)
 ETM_PRICE_LINE = re.compile(r'(\{"action"\s*:\s*"etm_price".*?\})', re.DOTALL)
 
+# Direct ETM ID detection from user message (bypass LLM)
+# Matches 6-8 digit numbers, optionally prefixed with ETM/etm/Etm
+ETM_CODE_PATTERN = re.compile(r'(?:ETM|etm|Etm|ЭТМ|этм)?\s*(\d{6,8})', re.IGNORECASE)
+# Keywords that signal a price/stock query
+ETM_KEYWORDS = re.compile(
+    r'(?:цен[аыу]|price|стоимость|остат[коки]|наличие|проверь|узнай|запроси|покажи|по коду|по кодам|по id)',
+    re.IGNORECASE,
+)
+
+
+def _detect_etm_ids_from_user(message: str) -> list[str] | None:
+    """
+    Detect ETM product IDs directly from user message.
+    Returns list of IDs if user is asking for ETM prices, None otherwise.
+    """
+    # Must contain a price/stock keyword
+    if not ETM_KEYWORDS.search(message):
+        return None
+
+    # Find all 6-8 digit codes
+    codes = ETM_CODE_PATTERN.findall(message)
+    if not codes:
+        return None
+
+    # Deduplicate while preserving order
+    seen = set()
+    unique = []
+    for c in codes:
+        if c not in seen:
+            seen.add(c)
+            unique.append(c)
+
+    return unique if unique else None
+
 
 def _extract_order(response: str) -> dict | None:
     """Try to extract submit_order JSON from LLM response."""
@@ -137,14 +171,27 @@ class ChatAgent:
         session_id = session_id or str(uuid.uuid4())
         history = history or []
 
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        messages.extend(history)
-        messages.append({"role": "user", "content": user_message})
-
         logger.info("chat_agent_request",
                      session_id=session_id,
                      user_message_len=len(user_message),
                      history_len=len(history))
+
+        # === FAST PATH: detect ETM IDs directly from user message ===
+        # This bypasses LLM entirely — no risk of LLM formatting issues
+        etm_ids = _detect_etm_ids_from_user(user_message)
+        if etm_ids:
+            logger.info("chat_agent_etm_direct",
+                        session_id=session_id,
+                        ids=etm_ids)
+            etm_result = await self._dispatch_etm_price(
+                {"ids": etm_ids, "type": "etm"}, session_id
+            )
+            return etm_result
+
+        # === NORMAL PATH: LLM conversation ===
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        messages.extend(history)
+        messages.append({"role": "user", "content": user_message})
 
         try:
             raw_response = await self.gigachat.chat(
@@ -153,7 +200,7 @@ class ChatAgent:
                 max_tokens=800,
             )
 
-            # Check for etm_price action
+            # Check for etm_price action from LLM (fallback)
             etm_data = _extract_etm_price(raw_response)
             if etm_data:
                 clean_text = _clean_response(raw_response)
