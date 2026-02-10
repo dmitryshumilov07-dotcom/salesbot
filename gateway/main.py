@@ -238,12 +238,36 @@ async def chat_completions(request: ChatCompletionRequest):
     if user_msg.role != "user":
         raise HTTPException(status_code=400, detail="Last message must be from user")
 
-    # webui_debug: log what WebUI sends
-    logger.info("webui_debug",
-                stream=request.stream,
-                msg_count=len(request.messages),
-                last_msg_len=len(user_msg.content),
-                last_msg_preview=user_msg.content[:100])
+    completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+    created = int(time.time())
+
+    # Detect WebUI system requests (title, tags, suggestions generation)
+    _is_webui_system = (
+        "### Task:" in user_msg.content
+        or "Generate a concise" in user_msg.content
+        or "summarizing the chat" in user_msg.content
+        or "categorizing the main themes" in user_msg.content
+        or "follow-up questions" in user_msg.content
+    )
+
+    if _is_webui_system:
+        # Return a simple LLM response without ETM interception
+        logger.info("webui_system_request", preview=user_msg.content[:80])
+        from agents.llm.gigachat_client import get_gigachat_client
+        gigachat = get_gigachat_client()
+        messages = [{"role": m.role, "content": m.content} for m in request.messages]
+        try:
+            resp_text = await gigachat.chat(messages=messages, temperature=0.5, max_tokens=200)
+        except Exception:
+            resp_text = "Chat"
+        return {
+            "id": completion_id,
+            "object": "chat.completion",
+            "created": created,
+            "model": "salesbot-consultant",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": resp_text}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        }
 
     history = []
     for msg in request.messages[:-1]:
@@ -251,8 +275,6 @@ async def chat_completions(request: ChatCompletionRequest):
             history.append({"role": msg.role, "content": msg.content})
 
     session_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(len(history)) + user_msg.content[:50]))
-    completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
-    created = int(time.time())
 
     if request.stream:
         return StreamingResponse(
