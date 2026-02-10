@@ -330,7 +330,9 @@ async def _stream_response(agent, user_message, history, session_id, completion_
         yield f"data: {json.dumps(final)}\n\n"
         yield "data: [DONE]\n\n"
     except Exception as e:
-        logger.error("stream_error", error=str(e))
+        # FIX: Add exc_info=True to capture full traceback for debugging
+        # This ensures the root cause is logged for investigation
+        logger.error("stream_error", error=str(e), exc_info=True)
         err = {"id": completion_id, "object": "chat.completion.chunk", "created": created,
                "model": "salesbot-consultant",
                "choices": [{"index": 0, "delta": {"content": "Error. Try again."}, "finish_reason": "stop"}]}

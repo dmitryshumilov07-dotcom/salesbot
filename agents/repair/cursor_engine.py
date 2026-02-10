@@ -54,6 +54,11 @@ class CursorEngine:
     def __init__(self):
         self.settings = get_settings()
         self.api_key = self.settings.cursor_api_key
+        # FIX: Validate API key presence during initialization
+        # This prevents runtime errors when methods requiring authorization are called
+        if not self.api_key:
+            logger.warning("cursor_api_key_not_configured",
+                          message="Cursor API key is not set. Repair operations will fail.")
         self.repo_url = self.settings.github_repo_url
         self.repo_branch = getattr(self.settings, "github_repo_branch", "main")
 
@@ -76,6 +81,15 @@ class CursorEngine:
         Returns:
             dict with agent_id, status, url
         """
+        # FIX: Check API key before making request to fail early with clear error
+        if not self.api_key:
+            logger.error("cursor_launch_no_api_key",
+                        message="Cannot launch repair - Cursor API key is not configured")
+            return {
+                "success": False,
+                "error": "Cursor API key is not configured. Set CURSOR_API_KEY environment variable.",
+            }
+        
         prompt = self._build_prompt(problem_description, logs, affected_files, context)
 
         logger.info("cursor_launching_agent",
