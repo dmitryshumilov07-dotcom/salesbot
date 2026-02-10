@@ -17,6 +17,9 @@ class TaskType(str, Enum):
     DB_WRITE = "db_write"         # Запись в БД
     MONITORING = "monitoring"     # Проверка здоровья системы
     REPAIR = "repair"             # Автоматическое восстановление системы
+    ETM_PRICE = "etm_price"       # ETM price lookup
+    ETM_REMAINS = "etm_remains"   # ETM stock check
+    ETM_CATALOG = "etm_catalog"   # ETM catalog export for RAG
     UNKNOWN = "unknown"
 
 

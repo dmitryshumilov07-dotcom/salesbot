@@ -90,6 +90,12 @@ async def _register_known_agents(dispatcher: Dispatcher):
             status=AgentStatus.OFFLINE,
             description="Automated system repair via Cursor API",
         ),
+        AgentInfo(
+            name="etm_agent",
+            task_types=[TaskType.ETM_PRICE.value, TaskType.ETM_REMAINS.value, TaskType.ETM_CATALOG.value],
+            status=AgentStatus.OFFLINE,
+            description="ETM API agent: prices, stock, catalog",
+        ),
     ]
     for agent in known_agents:
         await dispatcher.registry.register(agent)

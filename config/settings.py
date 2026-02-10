@@ -38,11 +38,17 @@ class Settings(BaseSettings):
     debug: bool = False
     log_level: str = "INFO"
 
+    # ETM API
+    etm_login: str = ""
+    etm_password: str = ""
+    etm_api_url: str = "https://ipro.etm.ru/api/v1"
+
     # Cursor API (Repair Agent)
     cursor_api_key: str = ""
     cursor_api_url: str = "https://api.cursor.com/v0"
     github_repo_url: str = ""
     github_repo_branch: str = "main"
+    github_pat: str = ""
 
     class Config:
         env_file = ".env"
