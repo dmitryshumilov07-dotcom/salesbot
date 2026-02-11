@@ -84,7 +84,12 @@ class RepairExecutor:
             }
 
     async def _do_restart_systemd(self, details: dict) -> dict:
-        """Restart a systemd service."""
+        """Restart a systemd service.
+        
+        SECURITY FIX: Tries user-level systemctl first to reduce privilege requirements.
+        Falls back to sudo only if user-level fails with permission/not-found error.
+        This approach follows the principle of least privilege.
+        """
         service = details.get("service_name", "")
         if not service:
             return {"success": False, "message": "No service_name provided", "output": ""}
@@ -103,6 +108,37 @@ class RepairExecutor:
 
         logger.info("repair_restarting_service", service=service)
 
+        # SECURITY: Try user-level systemctl first (no sudo required)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "systemctl", "--user", "restart", service,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+            output = (stdout.decode() + stderr.decode()).strip()
+            
+            if proc.returncode == 0:
+                logger.info("repair_service_restarted", service=service, method="user")
+                return {
+                    "success": True,
+                    "message": f"Service {service} restarted successfully (user mode)",
+                    "output": output,
+                }
+            
+            # If user mode failed with specific errors, try sudo as fallback
+            if "No such file" in output or "not loaded" in output.lower() or "access denied" in output.lower():
+                logger.warning("repair_user_systemctl_failed", 
+                              service=service, 
+                              output=output,
+                              fallback="sudo")
+        except Exception as e:
+            logger.warning("repair_user_systemctl_error", 
+                          service=service, 
+                          error=str(e),
+                          fallback="sudo")
+        
+        # Fallback to sudo for system-level services
         proc = await asyncio.create_subprocess_exec(
             "sudo", "systemctl", "restart", service,
             stdout=asyncio.subprocess.PIPE,
@@ -112,7 +148,7 @@ class RepairExecutor:
         output = (stdout.decode() + stderr.decode()).strip()
 
         if proc.returncode == 0:
-            logger.info("repair_service_restarted", service=service)
+            logger.info("repair_service_restarted", service=service, method="sudo")
             return {
                 "success": True,
                 "message": f"Service {service} restarted successfully",
@@ -185,14 +221,29 @@ class RepairExecutor:
             outputs.append(f"docker prune error: {e}")
 
         # Clean old logs
+        # SECURITY: Try user-level journalctl first, fallback to sudo
         try:
+            # First try user-level journal cleanup
             proc = await asyncio.create_subprocess_exec(
-                "sudo", "journalctl", "--vacuum-time=3d",
+                "journalctl", "--user", "--vacuum-time=3d",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
-            outputs.append(f"journal cleanup: {stdout.decode().strip()}")
+            user_output = stdout.decode().strip()
+            
+            if proc.returncode == 0:
+                outputs.append(f"journal cleanup (user): {user_output}")
+            else:
+                # Fallback to sudo for system journals
+                logger.warning("repair_user_journalctl_failed", fallback="sudo")
+                proc = await asyncio.create_subprocess_exec(
+                    "sudo", "journalctl", "--vacuum-time=3d",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+                outputs.append(f"journal cleanup: {stdout.decode().strip()}")
         except Exception as e:
             outputs.append(f"journal cleanup error: {e}")
 

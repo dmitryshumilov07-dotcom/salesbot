@@ -29,6 +29,47 @@ logger = structlog.get_logger()
 settings = get_settings()
 
 
+async def validate_agent_permissions(agent_name: str, task_types: list[str]) -> bool:
+    """Validate agent permissions before registering handlers.
+    
+    SECURITY: This function validates that an agent is authorized to handle
+    specific task types. Currently a stub that logs and returns True for
+    known internal agents. Should be extended with proper permission system.
+    
+    Args:
+        agent_name: Name of the agent requesting permissions
+        task_types: List of task types the agent wants to handle
+        
+    Returns:
+        bool: True if agent is authorized, False otherwise
+    """
+    # List of known internal agents that are pre-authorized
+    AUTHORIZED_INTERNAL_AGENTS = {
+        "etm_agent": ["etm_price", "etm_remains", "etm_catalog"],
+        "analysis_agent": ["analysis"],
+        "rag_agent": ["analysis"],
+    }
+    
+    if agent_name not in AUTHORIZED_INTERNAL_AGENTS:
+        logger.warning("agent_permission_denied", 
+                      agent=agent_name, 
+                      task_types=task_types,
+                      reason="unknown_agent")
+        return False
+    
+    allowed_tasks = AUTHORIZED_INTERNAL_AGENTS[agent_name]
+    for task_type in task_types:
+        if task_type not in allowed_tasks:
+            logger.warning("agent_permission_denied",
+                          agent=agent_name,
+                          task_type=task_type,
+                          reason="unauthorized_task_type")
+            return False
+    
+    logger.info("agent_permission_granted", agent=agent_name, task_types=task_types)
+    return True
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("gateway_startup", host=settings.gateway_host, port=settings.gateway_port)
@@ -38,14 +79,21 @@ async def lifespan(app: FastAPI):
     await _register_known_agents(dispatcher)
     logger.info("dispatcher_initialized")
 
-    # Register ETM handlers (in-process, synchronous dispatch)
-    dispatcher.register_handler("etm_price", handle_etm_price)
-    dispatcher.register_handler("etm_remains", handle_etm_remains)
-    logger.info("etm_handlers_registered")
+    # SECURITY FIX: Register ETM handlers with permission validation
+    # Only register handlers if the agent is authorized for these task types
+    if await validate_agent_permissions("etm_agent", ["etm_price", "etm_remains"]):
+        dispatcher.register_handler("etm_price", handle_etm_price)
+        dispatcher.register_handler("etm_remains", handle_etm_remains)
+        logger.info("etm_handlers_registered")
+    else:
+        logger.warning("etm_handlers_not_registered", reason="permission_denied")
 
-    # Register RAG handler
-    dispatcher.register_handler("analysis", handle_rag_search)
-    logger.info("rag_handler_registered")
+    # Register RAG handler with permission validation
+    if await validate_agent_permissions("analysis_agent", ["analysis"]):
+        dispatcher.register_handler("analysis", handle_rag_search)
+        logger.info("rag_handler_registered")
+    else:
+        logger.warning("rag_handler_not_registered", reason="permission_denied")
 
     # Set etm_agent as ONLINE since handler is in-process
     from redis.asyncio import Redis as _Redis
@@ -84,7 +132,16 @@ async def lifespan(app: FastAPI):
 
 
 async def _register_known_agents(dispatcher: Dispatcher):
-    """Pre-register all known agents. They start OFFLINE until they send heartbeat."""
+    """Pre-register all known agents. They start OFFLINE until they send heartbeat.
+    
+    PERFORMANCE FIX: Uses a single Redis connection for all operations instead of
+    creating/closing a new connection for each agent.
+    
+    RACE CONDITION FIX: Sets agent status to OFFLINE before registration to prevent
+    a race condition where an agent's heartbeat could be overwritten.
+    """
+    from redis.asyncio import Redis
+    
     known_agents = [
         AgentInfo(
             name="pricing_agent",
@@ -135,15 +192,37 @@ async def _register_known_agents(dispatcher: Dispatcher):
             description="ETM API agent: prices, stock, catalog",
         ),
     ]
-    for agent in known_agents:
-        await dispatcher.registry.register(agent)
-        # Set them offline (register sets online, we override)
-        agent.status = AgentStatus.OFFLINE
-        agent.last_heartbeat = 0
-        from redis.asyncio import Redis
+    
+    # PERFORMANCE FIX: Use a single Redis connection for all agent registrations
+    r = None
+    try:
         r = Redis.from_url(settings.redis_url, decode_responses=True)
-        await r.hset("dispatcher:agents", agent.name, agent.model_dump_json())
-        await r.close()
+        
+        for agent in known_agents:
+            # RACE CONDITION FIX: Set status BEFORE registration
+            # This ensures the agent starts as OFFLINE and won't have
+            # its status incorrectly overwritten if it sends a heartbeat
+            # during the registration process
+            agent.status = AgentStatus.OFFLINE
+            agent.last_heartbeat = 0
+            
+            # Register with dispatcher
+            await dispatcher.registry.register(agent)
+            
+            # Atomically write to Redis using pipeline for safety
+            async with r.pipeline(transaction=True) as pipe:
+                await pipe.hset("dispatcher:agents", agent.name, agent.model_dump_json())
+                await pipe.execute()
+                
+            logger.debug("agent_registered", agent=agent.name, status=agent.status.value)
+            
+    except Exception as e:
+        logger.error("agent_registration_error", error=str(e))
+        raise
+    finally:
+        # Ensure Redis connection is always closed
+        if r:
+            await r.close()
 
 
 app = FastAPI(

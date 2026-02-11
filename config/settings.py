@@ -5,6 +5,13 @@ from functools import lru_cache
 class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql+asyncpg://salesbot:salesbot_secure_2026@127.0.0.1:5432/salesbot"
+    # Individual PostgreSQL settings for health checks (loaded from env or defaults)
+    # SECURITY: Credentials should be stored in .env file, not hardcoded
+    postgres_host: str = "127.0.0.1"
+    postgres_port: int = 5432
+    postgres_user: str = "salesbot"
+    postgres_password: str = ""  # Must be set via POSTGRES_PASSWORD env variable
+    postgres_db: str = "salesbot"
 
     # Redis
     redis_url: str = "redis://:redis_secure_2026@127.0.0.1:6379/0"

@@ -70,12 +70,20 @@ class HealthChecks:
             return {"name": "Redis", "status": "critical", "value": str(e)[:80]}
 
     async def check_postgres(self) -> dict:
+        """Check PostgreSQL connectivity using settings from configuration.
+        
+        SECURITY FIX: Credentials are now loaded from settings (env variables)
+        instead of being hardcoded in the source code.
+        """
         try:
             import asyncpg
             conn = await asyncpg.connect(
-                host="127.0.0.1", port=5432,
-                user="salesbot", password="salesbot_secure_2026",
-                database="salesbot", timeout=5,
+                host=self.settings.postgres_host,
+                port=self.settings.postgres_port,
+                user=self.settings.postgres_user,
+                password=self.settings.postgres_password,
+                database=self.settings.postgres_db,
+                timeout=5,
             )
             result = await conn.fetchval("SELECT 1")
             await conn.close()
