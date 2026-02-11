@@ -112,8 +112,12 @@ class RepairClassifier:
                 count = self._failure_counts.get(check_name, 0) + 1
                 self._failure_counts[check_name] = count
 
-                # Escalate if auto-fix keeps failing
+                # BUG FIX: Initialize effective_level before the escalation check
+                # This ensures the variable is always defined before use,
+                # avoiding potential NameError if conditions change
                 effective_level = level
+                
+                # Escalate if auto-fix keeps failing
                 if count > self.ESCALATION_THRESHOLD and level == RepairLevel.AUTO:
                     effective_level = RepairLevel.CURSOR
                     action = "cursor_diagnose"
